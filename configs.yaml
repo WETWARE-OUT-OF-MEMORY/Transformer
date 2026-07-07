@@ -1,0 +1,19 @@
+# ============================================================
+# 超参数配置
+# ============================================================
+MODEL:
+  LAYER_NUM : 6
+  D_MODEL : 512
+  HEAD : 8
+  EPS : !!float 1e-5
+  D_FF : null
+  DROPOUT : 0.1
+  MAX_LENGTH : 128
+LR:
+  BETA1 : 0.9
+  BETA2 : 0.98
+  L_EPS : !!float 1e-9
+  WARMUP : 4000
+TRAIN:
+  EPOCHS : 5
+  BATCH_SIZE : 8

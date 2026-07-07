@@ -1,0 +1,18 @@
+# 数据集
+/data/
+
+# 虚拟环境
+/.venv/
+
+# IDE 配置
+.idea/
+
+# 模型权重
+*.pt
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# Jupyter 检查点（自动生成）
+.ipynb_checkpoints/
