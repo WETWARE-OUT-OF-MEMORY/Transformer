@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.nn import init
 
 from .encoder import Encoder
 from .decoder import Decoder
@@ -19,13 +20,21 @@ class Transformer(nn.Module):
         self.d_model = d_model
 
         self.src_emb = nn.Embedding(src_emb_sz, self.d_model)
+        # init.xavier_uniform_(self.src_emb.weight)
         self.tgt_emb = nn.Embedding(tgt_emb_sz, self.d_model)
+        # init.xavier_uniform_(self.tgt_emb.weight)
+
+        self.dropout = nn.Dropout(p=dropout)
 
         self.encoder = Encoder(layer_num, self.d_model, head, eps, d_ff,
                                dropout)
         self.decoder = Decoder(layer_num, self.d_model, head, eps, d_ff,
                                dropout)
         self.linear = LinearBlock(self.d_model, tgt_emb_sz)
+        init.xavier_uniform_(self.linear.layer.weight)
+        # 最终输出与两个embedding共享参数
+        self.src_emb.weight = self.linear.layer.weight
+        self.tgt_emb.weight = self.linear.layer.weight
 
     def positional_encoding(self, n: int):
         """生成位置编码矩阵 [n, d_model]"""
@@ -42,14 +51,15 @@ class Transformer(nn.Module):
         src = self.src_emb(src_ids) * math.sqrt(self.d_model)
         pe_src = self.positional_encoding(src.shape[-2])
         src = src + pe_src.to(src.device)
-        return self.encoder(src, src_pad_mask)
+        return self.encoder(self.dropout(src), src_pad_mask)
 
     def decode(self, tgt_ids: Tensor, tgt_pad_mask: Tensor,
                encoder_output: Tensor, src_pad_mask: Tensor):
         tgt = self.tgt_emb(tgt_ids) * math.sqrt(self.d_model)
+
         pe_tgt = self.positional_encoding(tgt.shape[-2])
         tgt = tgt + pe_tgt.to(tgt.device)
-        return self.decoder(tgt, encoder_output, src_pad_mask, tgt_pad_mask)
+        return self.decoder(self.dropout(tgt), encoder_output, src_pad_mask, tgt_pad_mask)
 
     def forward(self, src_ids: Tensor, tgt_ids: Tensor,
                 src_pad_mask: Tensor, tgt_pad_mask: Tensor):

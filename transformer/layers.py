@@ -1,6 +1,9 @@
+import math
+
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.nn import init
 
 
 class FFN(nn.Module):
@@ -13,12 +16,13 @@ class FFN(nn.Module):
 
         self.layer1 = nn.Linear(dim, d_ff)
         self.layer2 = nn.Linear(d_ff, dim)
+        init.xavier_uniform_(self.layer1.weight, gain=math.sqrt(2))
+        init.xavier_uniform_(self.layer2.weight, gain=1.0)
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: Tensor):
         x = self.relu(self.layer1(x))
-        return self.layer2(self.dropout(x))
+        return self.layer2(x)
 
 
 class LN(nn.Module):
@@ -44,6 +48,7 @@ class LinearBlock(nn.Module):
     def __init__(self, dim: int, emb_dim: int):
         super().__init__()
         self.layer = nn.Linear(dim, emb_dim)
+        init.xavier_uniform_(self.layer.weight)
 
     def forward(self, x: Tensor):
         return self.layer(x)

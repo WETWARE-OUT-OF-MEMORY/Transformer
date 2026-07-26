@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.nn import init
 from torch import Tensor
 
 class MultiHeadAttention(nn.Module):
@@ -8,18 +9,12 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, dim: int, head: int, dropout: float = 0.1,
                  need_mask: bool = False):
         super().__init__()
-        self.w_q = nn.Parameter(
-            torch.normal(mean=0, std=0.01, size=(dim, dim)),
-            requires_grad=True)
-        self.w_k = nn.Parameter(
-            torch.normal(mean=0, std=0.01, size=(dim, dim)),
-            requires_grad=True)
-        self.w_v = nn.Parameter(
-            torch.normal(mean=0, std=0.01, size=(dim, dim)),
-            requires_grad=True)
-        self.w_o = nn.Parameter(
-            torch.normal(mean=0, std=0.01, size=(dim, dim)),
-            requires_grad=True)
+
+        self.w_q = nn.Parameter(init.xavier_uniform_(torch.empty(dim, dim)), requires_grad=True)
+        self.w_k = nn.Parameter(init.xavier_uniform_(torch.empty(dim, dim)), requires_grad=True)
+        self.w_v = nn.Parameter(init.xavier_uniform_(torch.empty(dim, dim)), requires_grad=True)
+        self.w_o = nn.Parameter(init.xavier_uniform_(torch.empty(dim, dim)), requires_grad=True)
+
         self.h = head
         self.mask = need_mask
 

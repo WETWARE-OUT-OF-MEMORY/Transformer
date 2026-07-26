@@ -17,3 +17,14 @@ LR:
 TRAIN:
   EPOCHS : 5
   BATCH_SIZE : 8
+BPE:
+  IS_TRAINED : !!bool True            # BPE 模型是否已经训练完毕
+  VOCAB_SIZE : 32000                  # BPE 词汇量（IWSLT 常用 32k）
+  CHARACTER_COVERAGE : 0.9995         # 覆盖德语的特殊字符（ä ü ö ß）
+  MODEL_TYPE : "bpe"                  # BPE 算法
+  NUM_THREADS : 4
+  PAD_ID : 0                          # <pad> 索引 0
+  UNK_ID : 1                          # <unk> 索引 1
+  BOS_ID : 2                          # <s>  索引 2
+  EOS_ID : 3                          # </s> 索引 3
+  MERGE_SIZE : 5

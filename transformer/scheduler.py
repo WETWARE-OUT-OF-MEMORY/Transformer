@@ -15,3 +15,9 @@ class TransformerLRScheduler:
         )
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
+
+    def state_dict(self):
+        return {'step_num': self.step_num}
+
+    def load_state_dict(self, state_dict):
+        self.step_num = state_dict['step_num']
