@@ -3,6 +3,7 @@ from torch import Tensor
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
+from functools import partial
 
 import os
 from typing import List
@@ -35,7 +36,7 @@ def bpe_tokenize(sp_model, texts_en, texts_de):
     return emb_en, emb_de
 
 
-def merge_short_sentences(emb_en, emb_de, merge_sz):
+def merge_short_sentences(emb_en: List[List], emb_de: List[List], merge_sz: int):
     combine_en, combine_de = [], []
     for start in range(0, len(emb_en), merge_sz):
         end = min(start + merge_sz, len(emb_en))
@@ -44,7 +45,6 @@ def merge_short_sentences(emb_en, emb_de, merge_sz):
         combine_de.append(
             [token for group in emb_de[start:end] for token in group])
     return combine_en, combine_de
-
 
 class TranslationDataset(Dataset):
     def __init__(self, src_data, tgt_data):
@@ -59,21 +59,6 @@ class TranslationDataset(Dataset):
             torch.tensor(self.src_data[idx], dtype=torch.long),
             torch.tensor(self.tgt_data[idx], dtype=torch.long),
         )
-
-
-def collate_fn(batch, pad_id):
-    src_batch, tgt_batch = [], []
-    for src, tgt in batch:
-        src_batch.append(src)
-        tgt_batch.append(tgt)
-    src_batch = pad_sequence(src_batch, batch_first=True, padding_value=pad_id)
-    tgt_batch = pad_sequence(tgt_batch, batch_first=True, padding_value=pad_id)
-
-    src_pad_mask = (src_batch == pad_id)
-    tgt_pad_mask = (tgt_batch == pad_id)
-
-    return src_batch, tgt_batch, src_pad_mask, tgt_pad_mask
-
 
 def smoothed_loss(logits: Tensor, targets: Tensor,
                   ignore_index: int, smooth_indices: Tensor,
@@ -92,6 +77,38 @@ def smoothed_loss(logits: Tensor, targets: Tensor,
     log_probs = F.log_softmax(logits, dim=-1)
     return -(target_dist * log_probs).sum(dim=-1).mean()
 
+def collate_fn(batch, pad_id):
+    src_batch, tgt_batch = [], []
+    for src, tgt in batch:
+        src_batch.append(src)
+        tgt_batch.append(tgt)
+    src_batch = pad_sequence(src_batch, batch_first=True, padding_value=pad_id)
+    tgt_batch = pad_sequence(tgt_batch, batch_first=True, padding_value=pad_id)
+
+    src_pad_mask = (src_batch == pad_id)
+    tgt_pad_mask = (tgt_batch == pad_id)
+
+    return src_batch, tgt_batch, src_pad_mask, tgt_pad_mask
+
+# class Collator:
+#     def __init__(self, pad_id):
+#         self.pad_id = pad_id
+#
+#     def collate_fn(self, batch):
+#         src_batch, tgt_batch = [], []
+#         for src, tgt in batch:
+#             src_batch.append(src)
+#             tgt_batch.append(tgt)
+#         src_batch = pad_sequence(src_batch, batch_first=True, padding_value=self.pad_id)
+#         tgt_batch = pad_sequence(tgt_batch, batch_first=True, padding_value=self.pad_id)
+#
+#         src_pad_mask = (src_batch == self.pad_id)
+#         tgt_pad_mask = (tgt_batch == self.pad_id)
+#
+#         return src_batch, tgt_batch, src_pad_mask, tgt_pad_mask
+#
+#     def __call__(self, batch):
+#         return self.collate_fn(batch)
 
 # ============================================================
 # 主流程
@@ -202,10 +219,10 @@ if __name__ == "__main__":
         dataset,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        collate_fn=lambda batch: collate_fn(batch, PAD_ID),
+        collate_fn=partial(collate_fn, pad_id=PAD_ID),
         num_workers=2,
         pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=False,
     )
 
     # ============================================================
@@ -222,6 +239,8 @@ if __name__ == "__main__":
         print(f"Resumed at epoch {start_epoch}, "
               f"step_num={lr_scheduler.step_num}")
 
+    # batch size等效扩大倍数
+    accumulate_factor = 5
     for epoch in range(start_epoch, start_epoch + EPOCHS):
         epoch_loss = 0.0
         cnt = 0
@@ -231,8 +250,6 @@ if __name__ == "__main__":
             tgt = tgt.to(device)
             src_pad_mask = src_pad_mask.to(device)
             tgt_pad_mask = tgt_pad_mask.to(device)
-
-            optimizer.zero_grad()
 
             y = tf(src, tgt[:, :-1], src_pad_mask, tgt_pad_mask[:, :-1])
 
@@ -245,22 +262,19 @@ if __name__ == "__main__":
             )
 
             numerical_loss = loss.item()
-
-            if torch.isnan(loss):
-                print("NaN loss detected!")
-                print("src[0]:", sp.decode(src[0].tolist()))
-                print("tgt[0]:", sp.decode(tgt[0].tolist()))
-                break
+            loss /= accumulate_factor
+            loss.backward()
 
             if (cnt + 1) % 50 == 0:
-                print(f"Batch No: {cnt + 1}, loss: {numerical_loss:.4f}")
+                print(f"Epoch No: {epoch}, Batch No: {cnt + 1}, loss: {numerical_loss:.4f}")
 
             epoch_loss += numerical_loss
-            cnt += 1
 
-            loss.backward()
-            optimizer.step()
-            lr_scheduler.step()
+            if (cnt + 1) % accumulate_factor == 0 or (cnt + 1) == len(loader):
+                lr_scheduler.step()
+                optimizer.step()
+                optimizer.zero_grad()
+            cnt += 1
 
         print(f"Epoch: {epoch}; Average loss: {epoch_loss / cnt:.4f}")
 

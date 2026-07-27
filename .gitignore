@@ -16,3 +16,8 @@ __pycache__/
 
 # Jupyter 检查点（自动生成）
 .ipynb_checkpoints/
+
+# BPE模型与数据
+*.txt
+*.model
+*.vocab

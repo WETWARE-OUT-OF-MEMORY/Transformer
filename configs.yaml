@@ -8,7 +8,6 @@ MODEL:
   EPS : !!float 1e-5
   D_FF : null
   DROPOUT : 0.1
-  MAX_LENGTH : 128
 LR:
   BETA1 : 0.9
   BETA2 : 0.98

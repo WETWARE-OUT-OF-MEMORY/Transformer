@@ -89,8 +89,8 @@ def generate(model, tokenizer, input_text:str, max_length:int, device='cuda'):
         tgt = torch.tensor(generated).unsqueeze(0).to(device)
         tgt_pad_mask = torch.zeros_like(tgt, dtype=torch.bool)
         # 取最后一个位置的 logits
-        logits = model.decode(tgt, tgt_pad_mask, encoder_output, src_pad_mask)
-        next_token_logits = logits[:, -1, :]  # [1, vocab_sz]
+        hidden_state = model.decode(tgt, tgt_pad_mask, encoder_output, src_pad_mask)
+        next_token_logits = model.linear(hidden_state)[:, -1, :]  # [1, vocab_sz]
         # 贪心解码
         next_token = next_token_logits.argmax(dim=-1).item()
         generated.append(next_token)
