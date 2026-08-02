@@ -13,7 +13,7 @@ class EncoderBlock(nn.Module):
         super().__init__()
         self.h = head
 
-        self.attention = MultiHeadAttention(dim, self.h)
+        self.attention = MultiHeadAttention(dim, self.h, dropout=dropout)
         self.dropout1 = nn.Dropout(dropout)
         self.ln1 = LN(dim, eps)
 

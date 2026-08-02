@@ -8,14 +8,19 @@ MODEL:
   EPS : !!float 1e-5
   D_FF : null
   DROPOUT : 0.1
+  MAX_LENGTH : 1024                   # 训练阶段src、tgt输入的token数量上限
 LR:
   BETA1 : 0.9
   BETA2 : 0.98
   L_EPS : !!float 1e-9
   WARMUP : 4000
 TRAIN:
-  EPOCHS : 5
+  EPOCHS : 10
   BATCH_SIZE : 8
+  MAX_BATCH_LENGTH : 4096             # 等效合并大batch的token数量软上限
+  MAX_TOKENS : 2048                   # 单batch补齐pad后的token数量上限
+TEST:
+  MAX_GENERATE_LENGTH : 512           # 测试阶段逐token生成时最大上限
 BPE:
   IS_TRAINED : !!bool True            # BPE 模型是否已经训练完毕
   VOCAB_SIZE : 32000                  # BPE 词汇量（IWSLT 常用 32k）

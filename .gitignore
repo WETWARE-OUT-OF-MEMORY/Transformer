@@ -21,3 +21,6 @@ __pycache__/
 *.txt
 *.model
 *.vocab
+
+# 代码测试
+code_test.py
