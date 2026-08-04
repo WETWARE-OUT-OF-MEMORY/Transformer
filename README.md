@@ -4,6 +4,26 @@
 完成机器翻译的训练与评估。注意力、LayerNorm、位置编码、学习率调度、标签平滑损失
 均为手写实现，未使用 `nn.Transformer` 或 `nn.MultiheadAttention`。
 
+## 分支说明
+
+本仓库维护两个长期分支，对应本地开发与云端训练两种运行环境。
+
+**main（本地实现版本）**
+
+- 本地开发与调试用的实现分支
+- 面向本地开发机（RTX 2060 6GB）的全 FP32 训练
+- 显存配置较为保守：`MAX_TOKENS: 4096`、`MAX_BATCH_LENGTH: 4096`
+- 每次功能开发先在本地验证，通过后再同步到云端分支
+
+**Online-Server-Version（云服务器运行版本）**
+
+- 在云端 GPU 实例（RTX 4090 24GB）上训练运行的分支
+- 针对大显存放宽 batch 配置：`MAX_TOKENS: 12000`
+- 启用 BF16 混合精度（AMP）加速训练
+- 手写 LayerNorm 增加 FP32 保精度处理
+- 训练 loss 追加写入 `train_log.txt`，支持事后分析
+- 2026/08/04 云端完成 40 epoch 训练，tst2010 短句集 BLEU = 20.35
+
 ## 模型规模
 
 | 项 | 值 |
@@ -83,7 +103,13 @@ python IWSLT_train.py
 python validation_and_test.py
 ```
 
-超参数集中在 `configs.yaml`。`MAX_TOKENS` 需按显存调整，6GB 显存下建议 2048。
+超参数集中在 `configs.yaml`。`MAX_TOKENS` 需按显存调整，本地 6GB 显存下建议 2048，
+云端 24GB 显存下建议 12000。
+
+```bash
+# 云端训练切换到 Online-Server-Version 分支
+git checkout Online-Server-Version
+```
 
 ## 依赖
 
@@ -92,6 +118,17 @@ torch, sentencepiece, sacrebleu, pyyaml
 ---
 
 # 更新与调整
+
+## 2026/08/04
+
+**云端训练（Online-Server-Version）**
+
+- 在 RTX 4090 24GB 云实例上完成首轮 40 epoch 训练
+- `MAX_TOKENS` 提升至 12000，充分利用大显存
+- 启用 BF16 混合精度（AMP）+ GradScaler，等效算力约 50 TFLOPS
+- 手写 LayerNorm 进出转 FP32 保精度
+- 训练 loss 追加写入 `train_log.txt`
+- tst2010（单句）BLEU = 20.35，loss 与 BLEU 自洽
 
 ## 2026/08/02
 

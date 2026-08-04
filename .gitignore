@@ -14,6 +14,9 @@
 __pycache__/
 *.pyc
 
+# Jupyter测试文件
+*.ipynb
+
 # Jupyter 检查点（自动生成）
 .ipynb_checkpoints/
 

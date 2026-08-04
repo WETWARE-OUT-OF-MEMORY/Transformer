@@ -36,10 +36,14 @@ class LN(nn.Module):
 
     def forward(self, x: Tensor):
         """x: [batch, n, dim]"""
+        # 自实现LN进出转FP32
+        orig_dtype = x.dtype
+        x = x.float()
         mean = x.mean(dim=-1, keepdim=True)
         var = x.var(dim=-1, keepdim=True, unbiased=False)
         x = (x - mean) / torch.sqrt(var + self.eps)
-        return self.gamma * x + self.beta
+        x = self.gamma * x + self.beta
+        return x.to(orig_dtype)
 
 
 class LinearBlock(nn.Module):

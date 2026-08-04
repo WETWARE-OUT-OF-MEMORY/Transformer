@@ -1,34 +1,37 @@
-# ============================================================
-# 超参数配置
-# ============================================================
+DATA:
+  ROOT: "D:/Learn/machine_learning/data/iwslt2017-en-de/en-de"
 MODEL:
-  LAYER_NUM : 6
-  D_MODEL : 512
-  HEAD : 8
-  EPS : !!float 1e-5
-  D_FF : null
-  DROPOUT : 0.1
-  MAX_LENGTH : 1024                   # 训练阶段src、tgt输入的token数量上限
+  LAYER_NUM: 6
+  D_MODEL: 512
+  HEAD: 8
+  EPS: 1.0e-05
+  D_FF: null
+  DROPOUT: 0.1
+  MAX_LENGTH: 1024
 LR:
-  BETA1 : 0.9
-  BETA2 : 0.98
-  L_EPS : !!float 1e-9
-  WARMUP : 4000
+  BETA1: 0.9
+  BETA2: 0.98
+  L_EPS: 1.0e-09
+  WARMUP: 4000
 TRAIN:
-  EPOCHS : 10
-  BATCH_SIZE : 8
-  MAX_BATCH_LENGTH : 4096             # 等效合并大batch的token数量软上限
-  MAX_TOKENS : 2048                   # 单batch补齐pad后的token数量上限
+  EPOCHS: 1
+  BATCH_SIZE: 8  # 停用
+  MAX_BATCH_LENGTH: 12000
+  MAX_TOKENS: 12000
+VAL:
+  RUN_BLEU: true
 TEST:
-  MAX_GENERATE_LENGTH : 512           # 测试阶段逐token生成时最大上限
+  MAX_GENERATE_LENGTH: 512
+  MODE: val  # val: 验证, dev2010; test: 测试, tst2010-2012 逐句语料级 BLEU + tst2010/2011/2012 三个分年子分数
+  BLEU_TOKENIZE: intl
 BPE:
-  IS_TRAINED : !!bool True            # BPE 模型是否已经训练完毕
-  VOCAB_SIZE : 32000                  # BPE 词汇量（IWSLT 常用 32k）
-  CHARACTER_COVERAGE : 0.9995         # 覆盖德语的特殊字符（ä ü ö ß）
-  MODEL_TYPE : "bpe"                  # BPE 算法
-  NUM_THREADS : 4
-  PAD_ID : 0                          # <pad> 索引 0
-  UNK_ID : 1                          # <unk> 索引 1
-  BOS_ID : 2                          # <s>  索引 2
-  EOS_ID : 3                          # </s> 索引 3
-  MERGE_SIZE : 5
+  IS_TRAINED: true
+  VOCAB_SIZE: 32000
+  CHARACTER_COVERAGE: 0.9995
+  MODEL_TYPE: bpe
+  NUM_THREADS: 4
+  PAD_ID: 0
+  UNK_ID: 1
+  BOS_ID: 2
+  EOS_ID: 3
+  MERGE_SIZE: 5

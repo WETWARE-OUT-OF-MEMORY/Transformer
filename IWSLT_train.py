@@ -3,15 +3,19 @@ from torch import Tensor
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
+from torch.cuda.amp import autocast, GradScaler
 from functools import partial
 
 import os
+import re
 from typing import List
 import sentencepiece as spm
+import sacrebleu
 import yaml
+import datetime
 
 from transformer.token_bucket_batch_sampler import TokenBucketBatchSampler as Sampler
-from transformer.model import Transformer
+from transformer.model import Transformer, generate
 from transformer.scheduler import TransformerLRScheduler
 
 
@@ -29,11 +33,24 @@ def load_data(file_path: str) -> List[str]:
     return data
 
 
+def load_xml_data(file_path: str) -> List[str]:
+    """从 IWSLT XML 文件提取 <seg> 文本（用于验证/测试集）"""
+    seg_title = r'<seg id="\d+">.*?</seg>'
+    data = []
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if re.match(seg_title, line.strip()):
+                data.append(re.sub(r"<.*?>", '', line).strip())
+    return data
+
+
 def bpe_tokenize(sp_model, texts_en, texts_de):
-    emb_en, emb_de = [], []
-    for en, de in zip(texts_en, texts_de):
-        emb_en.append(sp_model.encode(en, out_type=int))
-        emb_de.append(sp_model.encode(de, out_type=int))
+    # emb_en, emb_de = [], []
+    # for en, de in zip(texts_en, texts_de):
+    #     emb_en.append(sp_model.encode(en, out_type=int))
+    #     emb_de.append(sp_model.encode(de, out_type=int))
+    emb_en = sp_model.encode(texts_en)
+    emb_de = sp_model.encode(texts_de)
     return emb_en, emb_de
 
 
@@ -131,6 +148,43 @@ def smoothed_loss(logits: Tensor, targets: Tensor, pad_index: int, exclude_ids: 
     per_token = (1 - epsilon) * nll + epsilon * smooth
     return (per_token * (targets != pad_index)).sum()
 
+
+@torch.no_grad()
+def validate(model, sp, device, dev_ids_en, dev_ids_de, dev_texts_en, dev_texts_de,
+             vocab_sz, pad_id, exclude_ids, max_length, run_bleu=True):
+    """每个 epoch 末在 dev2010 上验证。
+
+    返回 (per-token 验证 loss, dev2010 BLEU 或 None)
+    """
+    model.eval()
+    total_loss = 0.0
+    total_tokens = 0
+    bs = 64
+    for i in range(0, len(dev_ids_en), bs):
+        src = pad_sequence(
+            [torch.tensor(e, dtype=torch.long) for e in dev_ids_en[i:i + bs]],
+            batch_first=True, padding_value=pad_id).to(device)
+        tgt = pad_sequence(
+            [torch.tensor(d, dtype=torch.long) for d in dev_ids_de[i:i + bs]],
+            batch_first=True, padding_value=pad_id).to(device)
+        src_pad = (src == pad_id)
+        tgt_pad = (tgt == pad_id)
+
+        y = model(src, tgt[:, :-1], src_pad, tgt_pad[:, :-1])
+        loss = smoothed_loss(y.reshape(-1, vocab_sz), tgt[:, 1:].reshape(-1),
+                             pad_index=pad_id, exclude_ids=exclude_ids, epsilon=0.1)
+        total_loss += loss.item()
+        total_tokens += int((tgt[:, 1:] != pad_id).sum())
+    val_loss = total_loss / total_tokens
+
+    bleu = None
+    if run_bleu:
+        hypo = [generate(model, sp, s, max_length, device) for s in dev_texts_en]
+        bleu = sacrebleu.corpus_bleu(hypo, [dev_texts_de]).score
+
+    model.train()
+    return val_loss, bleu
+
 # ============================================================
 # 主流程
 # ============================================================
@@ -138,12 +192,12 @@ if __name__ == "__main__":
     # ============================================================
     # 配置 & 数据加载
     # ============================================================
-    DATA_PATH = "D:/Learn/machine_learning/data/iwslt2017-en-de/en-de"
-    train_en = load_data(DATA_PATH + "/train.tags.en-de.en")
-    train_de = load_data(DATA_PATH + "/train.tags.en-de.de")
-
     with open("configs.yaml", "r", encoding="utf-8") as f:
         configs = yaml.safe_load(f)
+
+    DATA_PATH = configs["DATA"]["ROOT"]
+    train_en = load_data(DATA_PATH + "/train.tags.en-de.en")
+    train_de = load_data(DATA_PATH + "/train.tags.en-de.de")
 
     # ============================================================
     # 超参数
@@ -167,6 +221,9 @@ if __name__ == "__main__":
     BATCH_SIZE = configs["TRAIN"]["BATCH_SIZE"]
     MAX_BATCH_LENGTH = configs["TRAIN"]["MAX_BATCH_LENGTH"]
     MAX_TOKENS = configs["TRAIN"]["MAX_TOKENS"]
+
+    RUN_BLEU = configs["VAL"].get("RUN_BLEU", True)
+    MAX_GENERATE_LENGTH = configs["TEST"]["MAX_GENERATE_LENGTH"]
 
     MODEL_TYPE = configs["BPE"]["MODEL_TYPE"]
     NUM_THREADS = configs["BPE"]["NUM_THREADS"]
@@ -212,6 +269,15 @@ if __name__ == "__main__":
     # ============================================================
     sp = spm.SentencePieceProcessor()
     sp.load("bpe_shared.model")
+
+    # ============================================================
+    # 验证集 dev2010（每个 epoch 末监控过拟合与翻译质量）
+    # ============================================================
+    dev_en_texts = load_xml_data(DATA_PATH + "/IWSLT17.TED.dev2010.en-de.en.xml")
+    dev_de_texts = load_xml_data(DATA_PATH + "/IWSLT17.TED.dev2010.en-de.de.xml")
+    dev_en_ids = [[BOS_ID] + t + [EOS_ID] for t in sp.encode(dev_en_texts, out_type=int)]
+    dev_de_ids = [[BOS_ID] + t + [EOS_ID] for t in sp.encode(dev_de_texts, out_type=int)]
+    print(f"dev2010 validation set: {len(dev_en_texts)} sentences")
 
     # single_emb_*: 单句训练对
     # medium_emb_*: 5句合并为中句训练对
@@ -267,6 +333,9 @@ if __name__ == "__main__":
 
     optimizer = torch.optim.Adam(
         params=tf.parameters(), betas=(beta1, beta2), eps=l_eps)
+
+    scaler = GradScaler()
+
     lr_scheduler = TransformerLRScheduler(
         optimizer=optimizer, d_model=D_MODEL, warmup_steps=WARMUP)
 
@@ -303,6 +372,9 @@ if __name__ == "__main__":
         print(f"Resumed at epoch {start_epoch}, "
               f"step_num={lr_scheduler.step_num}")
 
+    # 训练循环开始前（checkpoint 恢复之后，约第 306 行后）
+    log_file = open("train_log.txt", "a", encoding="utf-8", buffering=1)   # 行缓冲，崩溃不丢已写行
+
     for epoch in range(start_epoch, start_epoch + EPOCHS):
         # 每个epoch重建划分
         sampler.set_epoch(epoch)
@@ -318,8 +390,9 @@ if __name__ == "__main__":
             src_pad_mask = src_pad_mask.to(device)
             tgt_pad_mask = tgt_pad_mask.to(device)
 
-            # y: [batch, n, VOCAB_SZ]
-            y = tf(src, tgt[:, :-1], src_pad_mask, tgt_pad_mask[:, :-1])
+            with autocast(dtype=torch.bfloat16):
+                # y: [batch, n, VOCAB_SZ]
+                y = tf(src, tgt[:, :-1], src_pad_mask, tgt_pad_mask[:, :-1])
 
             loss = smoothed_loss(
                 y.reshape(-1, VOCAB_SZ),
@@ -332,12 +405,22 @@ if __name__ == "__main__":
             # 只计入去除BOS的decoder输入的token数
             token_num = (tgt[:, 1:] != PAD_ID).sum().item()
             numerical_loss = loss.item()
-            loss.backward()
+
+            # loss.backward()
+            scaler.scale(loss).backward()
+
             cnt += 1
             cur_batch_sz += token_num
             epoch_tokens += token_num
             if cnt % 50 == 0:
-                print(f"Epoch No: {epoch}, Batch No: {cnt}, loss: {numerical_loss:.4f}")
+                print(f"Epoch No: {epoch}, Batch No: {cnt}, loss: {numerical_loss / token_num:.4f}")
+
+                log_file.write(
+                    f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                    f"epoch={epoch} batch={cnt} "
+                    f"loss_per_token={numerical_loss / token_num:.4f} "
+                    f"tokens={token_num}\n"
+                )
 
             epoch_loss += numerical_loss
 
@@ -350,11 +433,34 @@ if __name__ == "__main__":
                         p.grad /= cur_batch_sz
 
                 lr_scheduler.step()
-                optimizer.step()
+
+                # optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
+
                 optimizer.zero_grad()
                 cur_batch_sz = 0
 
         print(f"Epoch: {epoch}; Average loss per token: {epoch_loss / epoch_tokens:.4f}")
+
+        # ============================================================
+        # 每个 epoch 末验证 dev2010：teacher-forcing 前向 loss + 生成 BLEU
+        # ============================================================
+        val_loss, bleu = validate(
+            tf, sp, device, dev_en_ids, dev_de_ids, dev_en_texts, dev_de_texts,
+            VOCAB_SZ, PAD_ID, exclude_ids, MAX_GENERATE_LENGTH, RUN_BLEU)
+        if bleu is not None:
+            print(f"Epoch: {epoch}; val loss: {val_loss:.4f}; dev2010 BLEU: {bleu:.2f}")
+            log_file.write(
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                f"epoch={epoch} val_loss={val_loss:.4f} dev2010_bleu={bleu:.2f}\n"
+            )
+        else:
+            print(f"Epoch: {epoch}; val loss: {val_loss:.4f}")
+            log_file.write(
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                f"epoch={epoch} val_loss={val_loss:.4f}\n"
+            )
 
         # 每个 epoch 结束后保存 checkpoint
         checkpoint = {

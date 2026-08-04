@@ -30,7 +30,7 @@ class MultiHeadAttention(nn.Module):
 
         q = x_q @ self.w_q
         q = q.reshape(q.shape[0], q.shape[1], self.h, -1) \
-            .transpose(1, 2).contiguous()
+            .transpose(1, 2)
 
         if is_cross and past_kv is not None:
             k, v = past_kv
@@ -44,9 +44,9 @@ class MultiHeadAttention(nn.Module):
             # 生成- q: [batch, head, 1, dim//head]
 
             k = k.reshape(k.shape[0], k.shape[1], self.h, -1) \
-                .transpose(1, 2).contiguous()
+                .transpose(1, 2)
             v = v.reshape(v.shape[0], v.shape[1], self.h, -1) \
-                .transpose(1, 2).contiguous()
+                .transpose(1, 2)
 
             if past_kv is not None:
                 # past_k/past_v: [batch, head, n-1, dim//head]
@@ -58,7 +58,7 @@ class MultiHeadAttention(nn.Module):
         # pad_mask: [batch, n] ---.unsqueeze(1).unsqueeze(2)---> [batch, 1, 1, n]
         # 训练- relevance: [batch, head, n, n]
         # 生成- relevance: [batch, head, 1, n]
-        k_t = k.transpose(-2, -1).contiguous()
+        k_t = k.transpose(-2, -1)
         relevance = torch.matmul(q, k_t) / (dim // self.h) ** 0.5
 
         # pad_mask: [batch, n] -unsqueeze-> [batch, 1, 1, n]
