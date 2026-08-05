@@ -17,6 +17,7 @@ import datetime
 from transformer.token_bucket_batch_sampler import TokenBucketBatchSampler as Sampler
 from transformer.model import Transformer, generate
 from transformer.scheduler import TransformerLRScheduler
+from transformer.paths import run_dir, find_latest_ckpt
 
 
 # ============================================================
@@ -361,19 +362,26 @@ if __name__ == "__main__":
     # ============================================================
     # 训练循环
     # ============================================================
+    OUT_DIR = run_dir()
+
     start_epoch = 0
-    if os.path.exists("transformer.pt"):
-        print("Resuming from checkpoint...")
-        checkpoint = torch.load("transformer.pt", map_location=device)
+    ckpt_path, _ = find_latest_ckpt()
+    if ckpt_path is not None:
+        print(f"Resuming from checkpoint: {ckpt_path}")
+        checkpoint = torch.load(ckpt_path, map_location=device)
         tf.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         lr_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         start_epoch = checkpoint.get("current_epoch", 0)
         print(f"Resumed at epoch {start_epoch}, "
               f"step_num={lr_scheduler.step_num}")
+    else:
+        print("No checkpoint found, starting from scratch")
 
-    # 训练循环开始前（checkpoint 恢复之后，约第 306 行后）
-    log_file = open("train_log.txt", "a", encoding="utf-8", buffering=1)   # 行缓冲，崩溃不丢已写行
+    # 训练循环开始前（checkpoint 恢复之后）
+    log_path = os.path.join(
+        OUT_DIR, f"train_log_{datetime.now().strftime('%H%M%S')}.txt")
+    log_file = open(log_path, "a", encoding="utf-8", buffering=1)   # 行缓冲，崩溃不丢已写行
 
     for epoch in range(start_epoch, start_epoch + EPOCHS):
         # 每个epoch重建划分
@@ -469,7 +477,7 @@ if __name__ == "__main__":
             "scheduler_state_dict": lr_scheduler.state_dict(),
             "current_epoch": epoch + 1,
         }
-        torch.save(checkpoint, "transformer.pt")
-        print(f"Checkpoint saved at epoch {epoch + 1}")
+        torch.save(checkpoint, os.path.join(OUT_DIR, "transformer.pt"))
+        print(f"Checkpoint saved at {os.path.join(OUT_DIR, 'transformer.pt')}")
 
 

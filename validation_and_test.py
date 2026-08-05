@@ -7,6 +7,7 @@ import torch
 import yaml
 
 from transformer.model import Transformer, generate
+from transformer.paths import run_dir, find_latest_ckpt
 
 DATA_ROOT = None
 
@@ -23,11 +24,33 @@ def load_data(file_name: str):
     return data
 
 
+def save_predictions(en, hypo, de, out_path):
+    """en/hypo/de 逐句写成 TSV，按逐句 BLEU 升序排列（最差排最前），便于对照分析。
+
+    列: idx | sent_bleu | source | hypothesis | reference
+    """
+    import csv
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    rows = []
+    for i, (s, h, r) in enumerate(zip(en, hypo, de)):
+        sb = sacrebleu.sentence_bleu(h, [r]).score
+        rows.append([i, round(sb, 2), s, h, r])
+    rows.sort(key=lambda x: x[1])
+    with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f, delimiter="\t")
+        w.writerow(["idx", "sent_bleu", "source", "hypothesis", "reference"])
+        w.writerows(rows)
+    print(f"predictions written to {out_path} ({len(rows)} rows)")
+
+
 def evaluate(model, tokenizer, files_en, files_de, max_length, device,
-             merge=1, tokenize="intl"):
+             merge=1, tokenize="intl", out_file=None):
     """对给定文件列表逐句（或 merge 句合并）翻译，计算语料级 BLEU。
 
-    返回 (CorpusBLEU 对象, 假设译文列表, 参考译文列表)
+    返回 (CorpusBLEU 对象, 源句列表, 假设译文列表, 参考译文列表)
+    若 out_file 指定，则将 en/hypo/de 写成 TSV。
     """
     en_all, de_all = [], []
     for fe, fd in zip(files_en, files_de):
@@ -46,7 +69,9 @@ def evaluate(model, tokenizer, files_en, files_de, max_length, device,
     hypo = [generate(model, tokenizer, s, max_length, device) for s in en]
     bleu = sacrebleu.corpus_bleu(hypo, [de], tokenize=tokenize)
     print(f"evaluated {len(en)} sentences (merge={merge}): {bleu}")
-    return bleu, hypo, de
+    if out_file:
+        save_predictions(en, hypo, de, out_file)
+    return bleu, en, hypo, de
 
 
 if __name__ == "__main__":
@@ -82,9 +107,18 @@ if __name__ == "__main__":
         max_length=MAX_LENGTH,
     ).to(device)
 
-    if os.path.exists("transformer.pt"):
-        checkpoint = torch.load("transformer.pt", map_location=device)
+    OUT_DIR = run_dir()
+
+    if os.path.exists(os.path.join(OUT_DIR, "transformer.pt")):
+        ckpt_path = os.path.join(OUT_DIR, "transformer.pt")
+    else:
+        ckpt_path, _ = find_latest_ckpt()
+    if ckpt_path is not None:
+        print(f"Loading checkpoint: {ckpt_path}")
+        checkpoint = torch.load(ckpt_path, map_location=device)
         tf.load_state_dict(checkpoint["model_state_dict"])
+    else:
+        print("WARNING: no checkpoint found, using random init")
 
     sp = spm.SentencePieceProcessor()
     sp.load("bpe_shared.model")
@@ -93,17 +127,23 @@ if __name__ == "__main__":
         # 最终上报：tst2010-2012 逐句语料级 BLEU，附分年子分数
         files_en = [f"IWSLT17.TED.tst{i}.en-de.en.xml" for i in range(2010, 2013)]
         files_de = [f"IWSLT17.TED.tst{i}.en-de.de.xml" for i in range(2010, 2013)]
-        overall, _, _ = evaluate(tf, sp, files_en, files_de,
-                                 MAX_GENERATE_LENGTH, device, tokenize=BLEU_TOKENIZE)
+        overall, _, _, _ = evaluate(tf, sp, files_en, files_de,
+                                    MAX_GENERATE_LENGTH, device,
+                                    tokenize=BLEU_TOKENIZE,
+                                    out_file=os.path.join(OUT_DIR, "tst2010-2012.tsv"))
         print(f"tst2010-2012 overall BLEU: {overall.score:.2f}")
         for i in range(3):
-            b, _, _ = evaluate(tf, sp, [files_en[i]], [files_de[i]],
-                               MAX_GENERATE_LENGTH, device, tokenize=BLEU_TOKENIZE)
+            b, _, _, _ = evaluate(tf, sp, [files_en[i]], [files_de[i]],
+                                  MAX_GENERATE_LENGTH, device,
+                                  tokenize=BLEU_TOKENIZE,
+                                  out_file=os.path.join(OUT_DIR, f"tst201{i}.tsv"))
             print(f"tst201{0 + i} BLEU: {b.score:.2f}")
     else:
         # 验证：dev2010（训练/调参期间反复使用）
-        bleu, _, _ = evaluate(tf, sp,
-                              ["IWSLT17.TED.dev2010.en-de.en.xml"],
-                              ["IWSLT17.TED.dev2010.en-de.de.xml"],
-                              MAX_GENERATE_LENGTH, device, tokenize=BLEU_TOKENIZE)
+        bleu, _, _, _ = evaluate(tf, sp,
+                                 ["IWSLT17.TED.dev2010.en-de.en.xml"],
+                                 ["IWSLT17.TED.dev2010.en-de.de.xml"],
+                                 MAX_GENERATE_LENGTH, device,
+                                 tokenize=BLEU_TOKENIZE,
+                                 out_file=os.path.join(OUT_DIR, "dev2010.tsv"))
         print(f"dev2010 BLEU: {bleu.score:.2f}")

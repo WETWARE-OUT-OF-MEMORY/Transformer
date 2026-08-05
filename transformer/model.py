@@ -83,6 +83,38 @@ class Transformer(nn.Module):
         tgt = self.linear(tgt)
         return tgt
 
+def sample_token(logits: Tensor, temperature: float = 1.0, top_k: int = 0, top_p: float = 0.0) -> int:
+    """
+    logits: [VOCAB_SZ] 单个位置的原始 logits
+    返回采样的 token id。
+    temperature=1, top_k=0, top_p=0 时退化为贪心。
+    """
+    if temperature != 1.0:
+        logits = logits / temperature
+
+    # Top-K：保留前 K 个，其余置 -inf
+    if top_k > 0:
+        k = min(top_k, logits.shape[-1])
+        topk_vals, _ = torch.topk(logits, k)
+        logits[logits < topk_vals[-1]] = float("-inf")
+
+    # Top-P：按累积概率截断
+    if top_p > 0.0:
+        sorted_logits, sorted_idx = torch.sort(logits, descending=True)
+        probs = torch.softmax(sorted_logits, dim=-1)
+        # cumsum: 含当前项的累加和
+        cumsum = torch.cumsum(probs, dim=-1)
+        # 找到累积概率首次超过 top_p 的位置，其后的全部剔除
+        # 剔除了当前项，使截断后至少含有一项
+        mask = cumsum - probs > top_p
+        sorted_logits[mask] = float("-inf")
+        # tensor.argsort(): 返回排序后元素的原索引，即tensor.sort()索引部分的逆操作
+        # tensor.gather(dim, idx): 在指定tensor的dim维度按照idx查表
+        logits = sorted_logits.gather(0, sorted_idx.argsort())
+    # 如选择截断前softmax还需要一次归一化，引入浮点误差
+    probs = torch.softmax(logits, dim=-1)
+    return torch.multinomial(probs, 1).item()
+
 @torch.no_grad()
 def generate(model, tokenizer, input_text:str, max_length: int, device='cuda'):
     """
@@ -108,11 +140,15 @@ def generate(model, tokenizer, input_text:str, max_length: int, device='cuda'):
 
         hidden_state, past_kv_list = model.decode(tgt, None, encoder_output, src_pad_mask,
                                     past_kv_list=past_kv_list, use_cache=True, start_pos=step)
+        # ToDo: 采样封装
         # 取最后一个位置的 logits
         next_token_logits = model.linear(hidden_state)[:, -1, :]  # [1, vocab_sz]
-        # 贪心解码
-        next_token = next_token_logits.argmax(dim=-1).item()
-        generated.append(next_token)
+        # # 贪心解码
+        # next_token = next_token_logits.argmax(dim=-1).item()
+        # generated.append(next_token)
+
+        # 暂时保持贪心设置
+        next_token = sample_token(next_token_logits)
 
         if next_token == tokenizer.eos_id():
             break

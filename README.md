@@ -46,12 +46,14 @@ transformer/
 ├── model.py                      Transformer 主模型 + 自回归生成
 ├── scheduler.py                  Noam 学习率调度
 ├── token_bucket_batch_sampler.py 分桶 + token 预算的动态组批
+├── paths.py                      output 日期目录与 checkpoint 查找
 ├── auto_clip_grad.py             AutoClip 梯度裁剪（可选，当前停用）
 └── agc_clip_grad.py              AGC 自适应梯度裁剪（可选，当前停用）
 
 IWSLT_train.py                    训练入口
 validation_and_test.py            BLEU 评估
 configs.yaml                      超参数配置
+output/                           训练输出（按日期分目录）
 ```
 
 ## 对齐论文的部分
@@ -118,6 +120,23 @@ torch, sentencepiece, sacrebleu, pyyaml
 ---
 
 # 更新与调整
+
+## 2026/08/05
+
+**输出管理与评估**
+
+- 新增 `transformer/paths.py`：训练输出统一归档到 `output/YYYYMMDD/`，
+  `find_latest_ckpt()` 按日期目录自动定位最新 checkpoint，支持多轮训练留档
+- `IWSLT_train.py` checkpoint 与训练日志迁入 `output/日期/`，日志文件名带
+  时间戳，避免覆盖历史记录
+- `validation_and_test.py` 新增 `save_predictions()`，将源句/译文/参考及
+  逐句 BLEU 写入 TSV（按句 BLEU 升序排列，最差排最前），便于对照分析
+
+**解码采样**
+
+- `transformer/model.py` 新增 `sample_token()` 并接入 `generate()`，实现
+  temperature、top-k、top-p 三种采样策略；当前参数 `temperature=1, top_k=0,
+  top_p=0` 等效贪心解码，采样开关参数待接入配置
 
 ## 2026/08/04
 

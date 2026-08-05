@@ -27,3 +27,6 @@ __pycache__/
 
 # 代码测试
 code_test.py
+
+# 输出
+output/
